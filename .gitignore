@@ -1,0 +1,9 @@
+*.jpg
+*.png
+*.bmp
+*.pyc
+__pycache__/
+*.pth
+*.txt
+*.csv
+*.json

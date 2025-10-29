@@ -123,11 +123,41 @@ class TextDataset(Dataset):
         return len(self.caption_pids)
 
     def __getitem__(self, index):
-        pid, caption = self.caption_pids[index], self.captions[index]
+        pid, caption_text = self.caption_pids[index], self.captions[index] # 使用 caption_text 避免混淆
 
-        caption = tokenize(caption, tokenizer=self.tokenizer, text_length=self.text_length, truncate=self.truncate)
+        # 将 caption 文本 tokenize
+        tokens = tokenize(caption_text, tokenizer=self.tokenizer, text_length=self.text_length, truncate=self.truncate)
 
-        return pid, caption
+        # --- 新增：计算实际长度 (cap_len) ---
+        # 找到第一个 padding token (0) 或 EOT token 的索引
+        eot_token = self.tokenizer.encoder["<|endoftext|>"]
+        try:
+            # 找到 SOT 之后第一个 padding 或 EOT
+            non_padding_indices = torch.where(tokens[1:] > 0)[0] # 排除 SOT
+            if len(non_padding_indices) > 0:
+                 # 加 1 是因为索引从0开始, 再加 1 是因为我们排除了 SOT
+                 cap_len = int(non_padding_indices.max()) + 2
+                 # 确保 cap_len 不超过最大长度
+                 cap_len = min(cap_len, self.text_length)
+                 # 处理特殊情况: 只有 SOT 和 EOT
+                 if tokens[1] == eot_token and cap_len == 2:
+                     pass # 正确长度是 2
+                 # 检查最后一个 token 是否是 EOT (如果文本被截断，可能不是)
+                 elif cap_len == self.text_length and tokens[cap_len - 1] != eot_token:
+                     pass # 截断时长度也是对的
+            else:
+                 # 只有 SOT (以及可能的 EOT 或 padding)
+                 cap_len = 2 if tokens[1] == eot_token else 1
+        except Exception:
+             # 备用逻辑: 找到最后一个非零 token
+             non_zero_indices = torch.where(tokens > 0)[0]
+             cap_len = int(non_zero_indices.max()) + 1 if len(non_zero_indices) > 0 else 1
+             cap_len = min(cap_len, self.text_length) # 确保不超过最大长度
+        # --- 长度计算结束 ---
+
+        # --- 修改 return 语句 ---
+        # 返回 visualize.py 期望的顺序: tokens, cap_len, pid
+        return tokens, cap_len, pid
 
 
 class ImageTextMLMDataset(Dataset):
