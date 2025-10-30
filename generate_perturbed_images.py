@@ -20,7 +20,7 @@ from datasets.cuhkpedes import CUHKPEDES
 # === 全局配置和路径 ===
 
 # 1. 指定包含 attack_mask.csv 和 defend_mask.csv 的完整路径
-ATTACK_MASK_CSV_PATH = '~/IRRA/data/CUHK-PEDES/mask_bicubic/attack_mask/attack_mask.csv'
+ATTACK_MASK_CSV_PATH = '/home/sanmuzzzzz/IRRA/data/CUHK-PEDES/mask_bicubic/attack_mask/attack_mask.csv'
 DEFEND_MASK_CSV_PATH = '~/IRRA/data/CUHK-PEDES/mask_bicubic/defend_mask/defend_mask.csv'
 
 # 2. 指定存放 攻击扰动 图像文件的目录 

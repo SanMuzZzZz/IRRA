@@ -1,3 +1,4 @@
+import os
 from typing import List
 from torch.utils.data import Dataset
 import os.path as osp
@@ -9,6 +10,11 @@ from prettytable import PrettyTable
 import random
 import regex as re
 import copy
+import os.path as op # 确保导入了 op
+from PIL import Image # 确保导入了 Image
+import pandas as pd # 导入 pandas
+import torchvision.transforms as T # 导入 T
+from utils.iotools import read_image # 导入 read_image (IRRA项目中已有)
 
 
 class BaseDataset(object):
@@ -56,6 +62,190 @@ def tokenize(caption: str, tokenizer, text_length=77, truncate=True) -> torch.Lo
     result[:len(tokens)] = torch.tensor(tokens)
     return result
 
+def load_perturbation_map(csv_path):
+    # Expand user path (~) if present
+    csv_path = op.expanduser(csv_path)
+    if not op.exists(csv_path):
+        print(f"Warning: Perturbation CSV file not found at {csv_path}. Returning empty map.")
+        return {}
+    try:
+        df = pd.read_csv(csv_path)
+        perturbation_map = {}
+        missing_count = 0
+        required_columns = ['file_path', 'mask_path']
+        if not all(col in df.columns for col in required_columns):
+             print(f"Error: CSV {csv_path} needs columns: {required_columns}")
+             return {}
+
+        for index, row in df.iterrows():
+            relative_key = row['file_path'].replace('\\', '/')
+            # Expand user path for the perturbation file as well
+            perturbation_abs_path = op.expanduser(row['mask_path'])
+            if op.exists(perturbation_abs_path):
+                perturbation_map[relative_key] = perturbation_abs_path
+            else:
+                missing_count += 1
+        print(f"Loaded {len(perturbation_map)} perturbation mappings from {csv_path}.")
+        if missing_count > 0:
+            print(f"Warning: Checked {len(df)} rows, {missing_count} referenced perturbation files not found.")
+        return perturbation_map
+    except Exception as e:
+        print(f"Error loading perturbation CSV {csv_path}: {e}")
+        return {}
+
+def get_relative_path_key(abs_path, dataset_folder_name):
+    try:
+        # Expand user path for robustness if needed, though img_paths are likely absolute already
+        abs_path = op.expanduser(abs_path)
+        key_part = dataset_folder_name + os.path.sep
+        parts = abs_path.split(os.path.sep)
+
+        try:
+            base_index = parts.index(dataset_folder_name)
+            # Adjust index based on whether 'imgs' exists and matches CSV format
+            start_index = base_index + 1
+            # Assuming CSV file_path starts after CUHK-PEDES/ (e.g., 'imgs/Market/file.jpg' or 'Market/file.jpg')
+            # Let's try to match the CSV format directly by taking everything after dataset_folder_name
+            relative_path = os.path.join(*parts[start_index:])
+            return relative_path.replace('\\', '/')
+        except ValueError:
+            # Fallback if dataset_folder_name not in path
+            print(f"Warning: '{dataset_folder_name}' not in path '{abs_path}'. Using fallback.")
+            parts_fallback = abs_path.replace('\\', '/').split('/')
+            if len(parts_fallback) >= 2 and parts_fallback[-2] in ['Market', 'test_query', 'train_query', 'imgs']:
+                 # Match common CSV patterns like 'Market/file.jpg' or 'test_query/file.jpg'
+                 return '/'.join(parts_fallback[-2:])
+            elif len(parts_fallback) >= 3:
+                 return '/'.join(parts_fallback[-3:]) # e.g., imgs/cam/file.jpg
+            else:
+                 return parts_fallback[-1]
+    except Exception as e:
+        print(f"Error extracting relative key from {abs_path}: {e}")
+        return None
+
+
+# === 新的 Dataset 类 ===
+class PerturbedImageDataset(Dataset):
+    """
+    Dataset that loads original images and optionally adds perturbation
+    before applying normalization. Returns PID and processed image Tensor.
+    """
+    def __init__(self, image_pids, img_paths, transform=None, # Basic transforms (Resize, ToTensor)
+                 normalize_transform=None, # Normalization transform
+                 perturbation_type='none',
+                 attack_csv_path=None,
+                 defend_csv_path=None,
+                 epsilon=16.0,
+                 dataset_folder_name='CUHK-PEDES'):
+
+        self.image_pids = image_pids
+        self.img_paths = img_paths
+        self.transform = transform # Should include Resize, ToTensor
+        self.normalize_transform = normalize_transform # Separate Normalize transform
+        self.perturbation_type = perturbation_type
+        self.epsilon = epsilon
+        self.dataset_folder_name = dataset_folder_name
+
+        self.attack_map = {}
+        self.defend_map = {}
+        if self.perturbation_type == 'attack' and attack_csv_path:
+            self.attack_map = load_perturbation_map(attack_csv_path)
+            if not self.attack_map: print("Warning: Attack map is empty.")
+        elif self.perturbation_type == 'defend' and defend_csv_path:
+            self.defend_map = load_perturbation_map(defend_csv_path)
+            if not self.defend_map: print("Warning: Defend map is empty.")
+
+        self.pil_to_tensor = T.ToTensor() # Local instance
+
+    def __len__(self):
+        return len(self.image_pids)
+
+    def __getitem__(self, index):
+        pid = self.image_pids[index]
+        img_path = self.img_paths[index]
+
+        try:
+            # 1. Load original image (PIL)
+            img_original_pil = read_image(img_path)
+
+            # --- 修改开始 ---
+            # 2. 应用基础变换 (Resize + ToTensor)
+            #    self.transform 预期是 build_transforms 返回的 base_transform
+            if self.transform is not None:
+                # 应用包含 Resize 和 ToTensor 的变换
+                img_tensor = self.transform(img_original_pil) # <<<--- 应用 transform
+                # 现在 img_tensor 应该是 [0, 1] 范围且尺寸固定
+            else:
+                # 如果没有 transform，至少需要 ToTensor
+                # 但这种情况可能意味着 Resize 也缺失了，最好确保 transform 被正确传递
+                print(f"Warning: No base transform provided for PerturbedImageDataset. Applying ToTensor only.")
+                img_tensor = self.pil_to_tensor(img_original_pil) # 尺寸可能不一致！
+            # --- 修改结束 ---
+
+            # 3. (Convert original image to Tensor [0, 1] - 这步已合并到上面的 transform 中)
+
+            # 4. Add perturbation if needed
+            if self.perturbation_type != 'none':
+                relative_key = get_relative_path_key(img_path, self.dataset_folder_name)
+                perturbation_path = None
+                if relative_key:
+                    if self.perturbation_type == 'attack':
+                        perturbation_path = self.attack_map.get(relative_key)
+                    elif self.perturbation_type == 'defend':
+                        perturbation_path = self.defend_map.get(relative_key)
+
+                if perturbation_path and op.exists(perturbation_path):
+                    try:
+                        perturbation_pil = read_image(perturbation_path)
+                        
+                        # --- 修改：也对扰动图应用基础变换 ---
+                        if self.transform is not None:
+                            # 对扰动图应用同样的 Resize + ToTensor
+                            perturbation_tensor = self.transform(perturbation_pil) # <<<--- 应用 transform
+                        else:
+                            # Fallback if no transform
+                            perturbation_tensor = self.pil_to_tensor(perturbation_pil)
+                            # 手动 resize (确保尺寸一致) - 但最好依赖 transform
+                            if perturbation_tensor.shape != img_tensor.shape:
+                                 target_shape = img_tensor.shape[1:] # (H, W)
+                                 print(f"Warning: Manually resizing perturbation tensor for {img_path} to {target_shape}")
+                                 perturbation_tensor = T.functional.resize(perturbation_tensor, target_shape, antialias=True)
+                        # --- 修改结束 ---
+
+                        # (不再需要手动检查和 resize perturbation_tensor)
+                        # if perturbation_tensor.shape != img_tensor.shape: ...
+
+                        # Calculate delta and add
+                        delta_tensor = (perturbation_tensor - 0.5) * (self.epsilon / 128.0)
+                        perturbed_tensor_unclamped = img_tensor + delta_tensor
+                        img_tensor = torch.clamp(perturbed_tensor_unclamped, 0.0, 1.0) # Update img_tensor
+
+                    except Exception as e:
+                        print(f"Warning: Error applying perturbation {perturbation_path} for {img_path}: {e}. Using original.")
+
+            # 5. Apply Normalization (applied last)
+            if self.normalize_transform is not None:
+                img_tensor = self.normalize_transform(img_tensor)
+
+            return pid, img_tensor
+
+        except Exception as e:
+            print(f"Error loading/processing image at index {index}, path {img_path}: {e}")
+            # Return placeholder data or skip? Returning None might break DataLoader.
+            # Let's return PID and a placeholder tensor (e.g., zeros)
+            # Find expected shape from transform or args if possible, otherwise guess C,H,W
+
+            # --- 修改这里的尺寸以匹配 args.img_size (默认 384, 128) ---
+            # 您可以硬编码为 options.py 中的默认值，或者尝试从 args 获取
+            # 假设默认尺寸为 H=384, W=128
+            height, width = 384, 128 # <<<--- 确保这里的 H, W 与 build_transforms 一致
+            placeholder_tensor = torch.zeros((3, height, width))
+            # --- 修改结束 ---
+
+            # Apply normalization to placeholder if possible
+            if self.normalize_transform:
+                 placeholder_tensor = self.normalize_transform(placeholder_tensor)
+            return pid, placeholder_tensor
 
 class ImageTextDataset(Dataset):
     def __init__(self,
@@ -153,11 +343,8 @@ class TextDataset(Dataset):
              non_zero_indices = torch.where(tokens > 0)[0]
              cap_len = int(non_zero_indices.max()) + 1 if len(non_zero_indices) > 0 else 1
              cap_len = min(cap_len, self.text_length) # 确保不超过最大长度
-        # --- 长度计算结束 ---
 
-        # --- 修改 return 语句 ---
-        # 返回 visualize.py 期望的顺序: tokens, cap_len, pid
-        return tokens, cap_len, pid
+        return pid, tokens
 
 
 class ImageTextMLMDataset(Dataset):

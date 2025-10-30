@@ -68,7 +68,17 @@ def get_args():
     parser.add_argument("--test_batch_size", type=int, default=512)
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--test", dest='training', default=True, action='store_false')
-
+    parser.add_argument("--perturb_type", type=str, default="none", choices=['none', 'attack', 'defend'],
+                        help="Type of perturbation to apply during testing/visualization.")
+    parser.add_argument("--attack_csv", type=str, default="/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/mask_bicubic/attack_mask/attack_mask.csv", # <<<--- 使用您提供的路径作为默认值
+                        help="Path to the CSV mapping original images to attack perturbations.")
+    parser.add_argument("--defend_csv", type=str, default="/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/mask_bicubic/defend_mask/defend_mask.csv", # <<<--- 使用您提供的路径作为默认值
+                        help="Path to the CSV mapping original images to defend perturbations.")
+    parser.add_argument("--perturb_epsilon", type=float, default=16.0, # <<<--- 使用您提供的 Epsilon 作为默认值
+                        help="Epsilon value used for rescaling perturbation visualization back to delta.")
+    parser.add_argument("--dataset_folder_name", type=str, default="CUHK-PEDES", # <<<--- 使用您提供的名称作为默认值
+                        help="Dataset folder name used for extracting relative paths (e.g., CUHK-PEDES).")
+    
     args = parser.parse_args()
 
     return args
