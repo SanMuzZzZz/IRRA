@@ -103,6 +103,25 @@ def build_dataloader(args, tranforms=None): # 函数签名不变
         test_base_transforms, test_normalize_transform = build_transforms(img_size=args.img_size, is_train=False)
 
         ds = dataset.test
+
+        # 1. 默认使用全部数据
+        image_pids=ds['image_pids']
+        img_paths=ds['img_paths']
+        caption_pids=ds['caption_pids']
+        captions=ds['captions']
+        
+        # 2. 检查是否需要截取子集 (减小分母)
+        N = args.test_query_subset
+        if hasattr(args, 'test_query_subset') and N > 0:
+            if N > len(captions):
+                logger.warning(f"--test_query_subset ({N}) is larger than total queries ({len(captions)}). Using all queries.")
+            else:
+                logger.info(f"Reducing test query set (denominator) to first {N} queries.")
+                # 仅截取查询列表 (caption_pids 和 captions)
+                caption_pids = caption_pids[:N]
+                captions = captions[:N]
+                # 注意：图像库 (image_pids, img_paths) 保持完整，以确保检索难度不变
+
         # --- 使用 PerturbedImageDataset ---
         logger.info(f"Building test image loader with perturbation type: {args.perturb_type}")
         test_img_set = PerturbedImageDataset(
@@ -118,7 +137,7 @@ def build_dataloader(args, tranforms=None): # 函数签名不变
         )
         # ---
 
-        test_txt_set = TextDataset(ds['caption_pids'], ds['captions'], text_length=args.text_length)
+        test_txt_set = TextDataset(caption_pids, captions, text_length=args.text_length)
 
         test_img_loader = DataLoader(test_img_set, batch_size=args.test_batch_size, shuffle=False, num_workers=num_workers)
         test_txt_loader = DataLoader(test_txt_set, batch_size=args.test_batch_size, shuffle=False, num_workers=num_workers)
