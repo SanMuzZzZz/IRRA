@@ -68,12 +68,14 @@ def get_args():
     parser.add_argument("--test_batch_size", type=int, default=512)
     parser.add_argument("--num_workers", type=int, default=8)
     parser.add_argument("--test", dest='training', default=True, action='store_false')
-    parser.add_argument("--perturb_type", type=str, default="none", choices=['none', 'attack', 'defend'],
+    parser.add_argument("--perturb_type", type=str, default="none", choices=['none', 'attack', 'defend', 'clean_ttc'],
                         help="Type of perturbation to apply during testing/visualization.")
     parser.add_argument("--attack_csv", type=str, default="/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/mask100/attack_mask_N100_images/attack_mask_N100.csv", 
                         help="Path to the CSV mapping original images to attack perturbations.")
     parser.add_argument("--defend_csv", type=str, default="/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/mask100/defend_mask_N100_images/defend_mask_N100.csv",
                         help="Path to the CSV mapping original images to defend perturbations.")
+    parser.add_argument("--clean_ttc_csv", type=str, default="/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/clean_mask/updated_data1.csv", # <<<--- 新增
+                        help="Path to the CSV mapping original images to clean_ttc perturbations.")
     parser.add_argument("--perturb_epsilon", type=float, default=16.0, 
                         help="Epsilon value used for rescaling perturbation visualization back to delta.")
     parser.add_argument("--dataset_folder_name", type=str, default="CUHK-PEDES", 

@@ -132,6 +132,7 @@ def build_dataloader(args, tranforms=None): # 函数签名不变
             perturbation_type=args.perturb_type,        # 传递扰动类型
             attack_csv_path=args.attack_csv,            # 传递 CSV 路径
             defend_csv_path=args.defend_csv,            # 传递 CSV 路径
+            clean_ttc_csv_path=args.clean_ttc_csv,
             epsilon=args.perturb_epsilon,               # 传递 Epsilon
             dataset_folder_name=args.dataset_folder_name # 传递数据集文件夹名
         )
