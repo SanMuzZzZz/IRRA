@@ -135,6 +135,7 @@ class PerturbedImageDataset(Dataset):
                  perturbation_type='none',
                  attack_csv_path=None,
                  defend_csv_path=None,
+                 clean_ttc_csv_path=None,
                  epsilon=16.0,
                  dataset_folder_name='CUHK-PEDES'):
 
@@ -148,12 +149,25 @@ class PerturbedImageDataset(Dataset):
 
         self.attack_map = {}
         self.defend_map = {}
+        self.clean_ttc_map = {}
+        
+        # 加载对应的扰动映射
         if self.perturbation_type == 'attack' and attack_csv_path:
             self.attack_map = load_perturbation_map(attack_csv_path)
             if not self.attack_map: print("Warning: Attack map is empty.")
-        elif self.perturbation_type == 'defend' and defend_csv_path:
-            self.defend_map = load_perturbation_map(defend_csv_path)
-            if not self.defend_map: print("Warning: Defend map is empty.")
+            
+        elif self.perturbation_type == 'defend':
+            # ====== 关键修复：defend 需要同时加载 attack 和 defend ======
+            if attack_csv_path:
+                self.attack_map = load_perturbation_map(attack_csv_path)
+                if not self.attack_map: print("Warning: Attack map is empty (defend mode).")
+            if defend_csv_path:
+                self.defend_map = load_perturbation_map(defend_csv_path)
+                if not self.defend_map: print("Warning: Defend map is empty.")
+                
+        elif self.perturbation_type == 'clean_ttc' and clean_ttc_csv_path:
+            self.clean_ttc_map = load_perturbation_map(clean_ttc_csv_path)
+            if not self.clean_ttc_map: print("Warning: clean_ttc map is empty.")
 
         self.pil_to_tensor = T.ToTensor() # Local instance
 
@@ -165,68 +179,94 @@ class PerturbedImageDataset(Dataset):
         img_path = self.img_paths[index]
 
         try:
-            # 1. Load original image (PIL)
+            # ====== 修复：确保mask与图片尺寸匹配 ======
+            # 1. 加载原始图片 (PIL)
             img_original_pil = read_image(img_path)
-
-            # --- 修改开始 ---
-            # 2. 应用基础变换 (Resize + ToTensor)
-            #    self.transform 预期是 build_transforms 返回的 base_transform
+            
+            # 2. 应用基础变换 (Resize + ToTensor)，得到目标尺寸
             if self.transform is not None:
-                # 应用包含 Resize 和 ToTensor 的变换
-                img_tensor = self.transform(img_original_pil) # <<<--- 应用 transform
-                # 现在 img_tensor 应该是 [0, 1] 范围且尺寸固定
+                img_tensor = self.transform(img_original_pil)  # 现在是 (3, 384, 128)
             else:
-                # 如果没有 transform，至少需要 ToTensor
-                # 但这种情况可能意味着 Resize 也缺失了，最好确保 transform 被正确传递
-                print(f"Warning: No base transform provided for PerturbedImageDataset. Applying ToTensor only.")
-                img_tensor = self.pil_to_tensor(img_original_pil) # 尺寸可能不一致！
-            # --- 修改结束 ---
-
-            # 3. (Convert original image to Tensor [0, 1] - 这步已合并到上面的 transform 中)
-
-            # 4. Add perturbation if needed
+                # Fallback: 仅 ToTensor（尺寸可能不一致）
+                print(f"Warning: No transform provided. Using ToTensor only.")
+                img_tensor = self.pil_to_tensor(img_original_pil)
+            
+            # 3. 在目标尺寸上应用扰动
             if self.perturbation_type != 'none':
                 relative_key = get_relative_path_key(img_path, self.dataset_folder_name)
-                perturbation_path = None
+                
                 if relative_key:
                     if self.perturbation_type == 'attack':
+                        # 只应用attack扰动
                         perturbation_path = self.attack_map.get(relative_key)
+                        if perturbation_path and op.exists(perturbation_path):
+                            try:
+                                perturbation_pil = read_image(perturbation_path)
+                                perturbation_tensor = self.pil_to_tensor(perturbation_pil)
+                                
+                                if perturbation_tensor.shape != img_tensor.shape:
+                                    perturbation_tensor = T.functional.resize(perturbation_tensor, img_tensor.shape[1:], antialias=True)
+                                
+                                delta_tensor = (perturbation_tensor - 0.5) * (self.epsilon / 128.0)
+                                img_tensor = torch.clamp(img_tensor + delta_tensor, 0.0, 1.0)
+                                
+                            except Exception as e:
+                                print(f"Warning: Error applying attack perturbation {perturbation_path} for {img_path}: {e}")
+                    
                     elif self.perturbation_type == 'defend':
-                        perturbation_path = self.defend_map.get(relative_key)
-
-                if perturbation_path and op.exists(perturbation_path):
-                    try:
-                        perturbation_pil = read_image(perturbation_path)
+                        # ====== 累积应用：先attack，再defend ======
+                        # 1. 应用attack扰动
+                        attack_path = self.attack_map.get(relative_key) if self.attack_map else None
+                        if attack_path and op.exists(attack_path):
+                            try:
+                                attack_pil = read_image(attack_path)
+                                attack_tensor = self.pil_to_tensor(attack_pil)
+                                
+                                if attack_tensor.shape != img_tensor.shape:
+                                    attack_tensor = T.functional.resize(attack_tensor, img_tensor.shape[1:], antialias=True)
+                                
+                                attack_delta = (attack_tensor - 0.5) * (self.epsilon / 128.0)
+                                img_tensor = torch.clamp(img_tensor + attack_delta, 0.0, 1.0)
+                                
+                            except Exception as e:
+                                print(f"Warning: Error applying attack perturbation {attack_path} for {img_path}: {e}")
                         
-                        # --- 修改：也对扰动图应用基础变换 ---
-                        if self.transform is not None:
-                            # 对扰动图应用同样的 Resize + ToTensor
-                            perturbation_tensor = self.transform(perturbation_pil) # <<<--- 应用 transform
-                        else:
-                            # Fallback if no transform
-                            perturbation_tensor = self.pil_to_tensor(perturbation_pil)
-                            # 手动 resize (确保尺寸一致) - 但最好依赖 transform
-                            if perturbation_tensor.shape != img_tensor.shape:
-                                 target_shape = img_tensor.shape[1:] # (H, W)
-                                 print(f"Warning: Manually resizing perturbation tensor for {img_path} to {target_shape}")
-                                 perturbation_tensor = T.functional.resize(perturbation_tensor, target_shape, antialias=True)
-                        # --- 修改结束 ---
-
-                        # (不再需要手动检查和 resize perturbation_tensor)
-                        # if perturbation_tensor.shape != img_tensor.shape: ...
-
-                        # Calculate delta and add
-                        delta_tensor = (perturbation_tensor - 0.5) * (self.epsilon / 128.0)
-                        perturbed_tensor_unclamped = img_tensor + delta_tensor
-                        img_tensor = torch.clamp(perturbed_tensor_unclamped, 0.0, 1.0) # Update img_tensor
-
-                    except Exception as e:
-                        print(f"Warning: Error applying perturbation {perturbation_path} for {img_path}: {e}. Using original.")
-
-            # 5. Apply Normalization (applied last)
+                        # 2. 应用defend扰动
+                        defend_path = self.defend_map.get(relative_key) if self.defend_map else None
+                        if defend_path and op.exists(defend_path):
+                            try:
+                                defend_pil = read_image(defend_path)
+                                defend_tensor = self.pil_to_tensor(defend_pil)
+                                
+                                if defend_tensor.shape != img_tensor.shape:
+                                    defend_tensor = T.functional.resize(defend_tensor, img_tensor.shape[1:], antialias=True)
+                                
+                                defend_delta = (defend_tensor - 0.5) * (self.epsilon / 128.0)
+                                img_tensor = torch.clamp(img_tensor + defend_delta, 0.0, 1.0)
+                                
+                            except Exception as e:
+                                print(f"Warning: Error applying defend perturbation {defend_path} for {img_path}: {e}")
+                    
+                    elif self.perturbation_type == 'clean_ttc':
+                        perturbation_path = self.clean_ttc_map.get(relative_key)
+                        if perturbation_path and op.exists(perturbation_path):
+                            try:
+                                perturbation_pil = read_image(perturbation_path)
+                                perturbation_tensor = self.pil_to_tensor(perturbation_pil)
+                                
+                                if perturbation_tensor.shape != img_tensor.shape:
+                                    perturbation_tensor = T.functional.resize(perturbation_tensor, img_tensor.shape[1:], antialias=True)
+                                
+                                delta_tensor = (perturbation_tensor - 0.5) * (self.epsilon / 128.0)
+                                img_tensor = torch.clamp(img_tensor + delta_tensor, 0.0, 1.0)
+                                
+                            except Exception as e:
+                                print(f"Warning: Error applying clean_ttc perturbation {perturbation_path} for {img_path}: {e}")
+            
+            # 4. 最后应用 Normalize
             if self.normalize_transform is not None:
                 img_tensor = self.normalize_transform(img_tensor)
-
+            
             return pid, img_tensor
 
         except Exception as e:
