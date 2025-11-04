@@ -12,10 +12,10 @@ CONFIG = {
     "ORIGINAL_CSV_FILE": "/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/mask111/mask/defend_mask/updated_data2.csv",
     
     # 2. 【新】掩膜图像的【目标文件夹】路径 (脚本将自动创建)
-    "TARGET_IMAGE_FOLDER": "/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/defend_mask_N200_images/",
+    "TARGET_IMAGE_FOLDER": "/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/mask_111/defend_mask_N2_400_images/",
     
     # 3. 【新】CSV文件的【输出路径】(包含文件名)
-    "NEW_CSV_OUTPUT_PATH": "/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/defend_mask_N200_images/defend_mask_N200.csv",
+    "NEW_CSV_OUTPUT_PATH": "/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/mask_111/defend_mask_N2_400_images/defend_mask_N2_400.csv",
 
     # 4. 'mask_path' 所在的【列索引】(0-based, 默认为 2，即第3列)
     # (参考: select.py)
@@ -24,11 +24,11 @@ CONFIG = {
     # 5. 选择行的方式 (二选一)
     
     # 方式A: 选择前 N 行
-    #"SELECT_N_ROWS": 100, 
+    #"SELECT_N_ROWS": 200, 
     
     # 方式B: 选择一个切片 (如果使用方式A，请忽略此项)
-    "SELECT_START_ROW": 0,
-    "SELECT_END_ROW": 200, 
+    "SELECT_START_ROW": 200,
+    "SELECT_END_ROW": 400, 
 }
 
 # ----------------------------------------------------

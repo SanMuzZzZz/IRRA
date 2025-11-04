@@ -70,9 +70,9 @@ def get_args():
     parser.add_argument("--test", dest='training', default=True, action='store_false')
     parser.add_argument("--perturb_type", type=str, default="none", choices=['none', 'attack', 'defend'],
                         help="Type of perturbation to apply during testing/visualization.")
-    parser.add_argument("--attack_csv", type=str, default="/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/attack_mask_N2000_images/attack_mask_N2000.csv", 
+    parser.add_argument("--attack_csv", type=str, default="/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/mask100/attack_mask_N100_images/attack_mask_N100.csv", 
                         help="Path to the CSV mapping original images to attack perturbations.")
-    parser.add_argument("--defend_csv", type=str, default="/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/defend_mask_N2000_images/defend_mask_N2000.csv", 
+    parser.add_argument("--defend_csv", type=str, default="/home/sanmuzzzzz/Hack/Research/IRRA/data/CUHK-PEDES/mask100/defend_mask_N100_images/defend_mask_N100.csv",
                         help="Path to the CSV mapping original images to defend perturbations.")
     parser.add_argument("--perturb_epsilon", type=float, default=16.0, 
                         help="Epsilon value used for rescaling perturbation visualization back to delta.")
